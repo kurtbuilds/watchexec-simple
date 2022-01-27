@@ -41,7 +41,3 @@ Not currently published to cargo. Git clone it and then install from local.
     git clone https://github.com/kurtbuilds/watchexec-simple
     cd watchexec-simple
     cargo install --path .
-
-# Examples
-
-    watchexec -- just run
