@@ -1,6 +1,8 @@
 # Usage
 
-`watchexec-simple` is a simpler replacement for the existing `watchexec` project.
+`watchexec-simple` is a simpler alternative for the existing `watchexec` project. It doesn't implement nearly 
+all the features that the `watchexec` project provides. However, it provides the core functionality in a codebase
+that is 2% the size of `watchexec` project. It is still built on `notify`, built by the same authors as `watchexec`.
 
 Here is a simple example:
 

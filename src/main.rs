@@ -104,6 +104,8 @@ fn main() -> Result<(), Error> {
     let mut status = Status::RestartProcess;
 
     let (sender, receiver) = channel();
+    // Not sure why, but the built-in debouncing seems to cause us to drop tons of events that should
+    // be handled. Instead, we implement our own debouncing.
     let mut watcher = watcher(sender, Duration::from_millis(0)).unwrap();
     for p in args.values_of("paths")
         .map(|v| v.collect::<Vec<&str>>())
