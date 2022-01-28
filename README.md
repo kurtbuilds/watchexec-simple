@@ -2,7 +2,7 @@
 
 `watchexec-simple` is a simpler alternative for the existing `watchexec` project. It doesn't implement nearly 
 all the features that the full `watchexec` project provides. However, it provides the core functionality in a codebase
-that is 2% the size of `watchexec` project. It is built on the same `notify` library, itself built by the same authors as `watchexec`. 
+that is much smaller (at last count, 2%). It is built on the same `notify` library, itself built by the same authors as `watchexec`. 
 `watchexec-simple` installs to the same binary name as the `watchexec` project.
 
 Here is a simple example of using `watchexec-simple`:

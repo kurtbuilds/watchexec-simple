@@ -360,7 +360,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "watchexec2"
+name = "watchexec-simple"
 version = "0.1.0"
 dependencies = [
  "clap",

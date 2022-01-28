@@ -1,10 +1,10 @@
-use notify::{Watcher, RecommendedWatcher, RecursiveMode, watcher, DebouncedEvent};
+use notify::{Watcher, RecursiveMode, watcher, DebouncedEvent};
 use std::borrow::Cow;
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{channel, RecvTimeoutError};
-use std::thread::sleep;
-use std::time::{Duration, Instant, SystemTime};
+
+use std::time::{Duration, Instant};
 use clap::{AppSettings, Arg};
 use regex::Regex;
 
@@ -86,6 +86,7 @@ fn main() -> Result<(), Error> {
         .arg(Arg::new("command")
             .last(true)
             .min_values(1)
+            .required(true)
             .help("The command to execute if an update has occurred.")
         )
         .get_matches();
@@ -109,7 +110,7 @@ fn main() -> Result<(), Error> {
     let mut watcher = watcher(sender, Duration::from_millis(0)).unwrap();
     for p in args.values_of("paths")
         .map(|v| v.collect::<Vec<&str>>())
-        .unwrap_or(vec!["."]) {
+        .unwrap_or_else(|| vec!["."]) {
         println!("Watching {}", p);
         watcher.watch(Path::new(p), RecursiveMode::Recursive).unwrap();
     }
@@ -139,7 +140,7 @@ fn main() -> Result<(), Error> {
                     }
                     _ => continue,
                 };
-                if extensions.len() > 0 {
+                if !extensions.is_empty() {
                     match w.extension() {
                         None => continue,
                         Some(e) => {
@@ -149,7 +150,7 @@ fn main() -> Result<(), Error> {
                         }
                     }
                 }
-                if ignore_regexes.iter().any(|r| r.is_match(&w.to_string_lossy().as_ref())) {
+                if ignore_regexes.iter().any(|r| r.is_match(w.to_string_lossy().as_ref())) {
                     continue;
                 }
                 eprintln!("{}: File modified. Resetting waiting period.", w.to_str().unwrap());
