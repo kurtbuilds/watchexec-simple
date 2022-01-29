@@ -2,7 +2,7 @@
 
 `watchexec-simple` is a simpler alternative for the existing `watchexec` project. It doesn't implement nearly 
 all the features that the full `watchexec` project provides. However, it provides the core functionality in a codebase
-that is much smaller (at last count, 2%). It is built on the same `notify` library, itself built by the same authors as `watchexec`. 
+that is much smaller (at last count, 5%). It is built on the same `notify` library, itself built by the same authors as `watchexec`. 
 `watchexec-simple` installs to the same binary name as the `watchexec` project.
 
 Here is a simple example of using `watchexec-simple`:
@@ -25,7 +25,6 @@ watchexec -w src/ -w data/ -w .env cargo run
 ```
 
 2. By default, `watchexec-simple` restarts the process, even if it is actively running. For `watchexec`, the user is required to pass the `-r` option. Example:
-
 
 ```bash
 # watchexec-simple
