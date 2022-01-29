@@ -18,7 +18,7 @@ release:
     cargo build --release
 
 install:
-    cargo install --path .
+    cargo install --path . --bin watchexec
 
 bootstrap:
     cargo install cargo-edit
