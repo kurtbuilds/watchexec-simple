@@ -26,6 +26,7 @@ watchexec -w src/ -w data/ -w .env cargo run
 
 2. By default, `watchexec-simple` restarts the process, even if it is actively running. For `watchexec`, the user is required to pass the `-r` option. Example:
 
+
 ```bash
 # watchexec-simple
 watchexec -- cargo run
@@ -33,6 +34,10 @@ watchexec -- cargo run
 # watchexec
 watchexec -r cargo run
 ```
+
+3. `watchexec-simple` does not run the command in a shell. If you want a shell, 
+   use something like: `watchexec -- /bin/bash -c 'command'`. By default,
+   `watchexec` runs all commands in a shell.
 
 # Installation
 

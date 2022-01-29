@@ -7,6 +7,9 @@ build:
     cargo build
 alias b := build
 
+alive:
+    target/debug/alive
+
 run *args:
     cargo run {{args}}
 alias r := run
