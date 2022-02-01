@@ -3,8 +3,8 @@
 extern crate core;
 
 mod error;
-
-use notify::{Watcher, RecursiveMode, watcher, DebouncedEvent};
+mod filter;
+use notify::{DebouncedEvent, RecursiveMode, Watcher, watcher};
 use std::borrow::Cow;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use std::process::{Child, Command, ExitStatus};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, RecvTimeoutError, TryRecvError};
 use std::thread;
-use crate::error::{Error};
+use crate::error::Error;
 
 use std::time::{Duration, Instant};
 use clap::{AppSettings, Arg, ArgMatches};
@@ -24,6 +24,8 @@ use nix::libc::exit;
 use nix::sys;
 use nix::unistd::Pid;
 use regex::Regex;
+use filter::Filter;
+use crate::filter::find_project_gitignore;
 
 
 macro_rules! cond_eprintln {
@@ -126,53 +128,6 @@ fn build_app() -> clap::App<'static> {
         )
 }
 
-
-fn handle_event(
-    w: &PathBuf,
-    filter: &Filter,
-) -> bool {
-    if filter.watched_files.contains(&w.to_string_lossy().as_ref()) {
-        return true;
-    }
-    for ignore in &filter.ignore_globs {
-        if ignore.matches(&w.to_string_lossy().as_ref()) {
-            return false;
-        }
-    }
-    if filter.extensions.len() > 0 {
-        match w.extension() {
-            Some(ext) => {
-                if filter.extensions.contains(&ext.to_string_lossy().as_ref()) {
-                    return true;
-                }
-            }
-            None => return false
-        }
-    }
-    if let Some(gitignore) = &filter.gitignore {
-        if gitignore.matched_path_or_any_parents(&w.to_string_lossy().as_ref(), w.is_dir()).is_ignore() {
-            return false;
-        }
-    }
-    if let Some(global_ignore) = &filter.global_gitignore {
-        if global_ignore.matched_path_or_any_parents(&w.to_string_lossy().as_ref(), w.is_dir()).is_ignore() {
-            return false;
-        }
-    }
-    return true;
-}
-
-
-
-
-struct Filter<'a> {
-    watched_files: Vec<&'a str>,
-    extensions: Vec<&'a str>,
-    gitignore: Option<Gitignore>,
-    global_gitignore: Option<Gitignore>,
-    ignore_globs: Vec<Pattern>,
-}
-
 fn signal_with_kill_fallback(mut child: GroupChild, signal: Signal) -> Result<(), Error> {
     if child.try_wait().is_ok() {
             return Ok(());
@@ -245,8 +200,7 @@ fn main() -> Result<(), Error> {
     let gitignore = if args.is_present("no-project-ignore") {
         None
     } else {
-        let (g, _) = Gitignore::new(".gitignore");
-        Some(g)
+        find_project_gitignore()
     };
 
     let global_gitignore = if args.is_present("no-global-ignore") {
@@ -349,7 +303,7 @@ fn main() -> Result<(), Error> {
                     }
                     _ => continue,
                 };
-                if !handle_event(&w, &filter) {
+                if !filter::handle_event(&w, &filter) {
                     continue;
                 }
                 cond_eprintln!(verbose, "{}: File modified. Queuing restart.", w.to_str().unwrap());
