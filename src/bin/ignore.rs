@@ -1,5 +1,5 @@
-use std::{process, thread};
-use std::time::Duration;
+
+
 use ignore::gitignore::Gitignore;
 
 fn main() {

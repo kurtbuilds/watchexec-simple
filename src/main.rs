@@ -6,24 +6,24 @@ mod error;
 mod filter;
 use notify::{DebouncedEvent, RecursiveMode, Watcher, watcher};
 use std::borrow::Cow;
-use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus};
-use std::sync::{Arc, Mutex};
+
+use std::path::{Path};
+use std::process::{Command};
+
 use std::sync::mpsc::{channel, RecvTimeoutError, TryRecvError};
 use std::thread;
 use crate::error::Error;
 
 use std::time::{Duration, Instant};
-use clap::{AppSettings, Arg, ArgMatches};
+use clap::{AppSettings, Arg};
 use command_group::{CommandGroup, GroupChild, Signal, UnixChildExt};
 use glob::{Pattern, PatternError};
-use ignore::gitignore::{Gitignore, Glob};
-use ignore::Match;
-use nix::libc::exit;
-use nix::sys;
-use nix::unistd::Pid;
-use regex::Regex;
+use ignore::gitignore::{Gitignore};
+
+
+
+
+
 use filter::Filter;
 use crate::filter::find_project_gitignore;
 
@@ -141,7 +141,7 @@ fn signal_with_kill_fallback(mut child: GroupChild, signal: Signal) -> Result<()
             Ok(None) => {
                 thread::sleep(Duration::from_millis(25));
             }
-            Err(e) => {
+            Err(_e) => {
                 return Err(err!("Failed to wait for child process to exit"));
             }
         }
@@ -177,7 +177,7 @@ fn main() -> Result<(), Error> {
 
     let mut ignore_globs = args.values_of("ignore")
         .unwrap_or_default()
-        .map(|i| Pattern::new(i))
+        .map(Pattern::new)
         .collect::<Result<Vec<_>, PatternError>>()
         .map_err(|e| err!("Invalid ignore glob: {}", e))?;
 
@@ -260,7 +260,7 @@ fn main() -> Result<(), Error> {
                     }
                 }
                 BusyAction::DoNothing => {
-                    if let Some(mut child) = child.as_mut() {
+                    if let Some(child) = child.as_mut() {
                         match child.try_wait().unwrap() {
                             None => {
                                 continue;
@@ -270,7 +270,7 @@ fn main() -> Result<(), Error> {
                     }
                 }
                 BusyAction::Queue => {
-                    if let Some(mut child) = child.as_mut() {
+                    if let Some(child) = child.as_mut() {
                         match child.try_wait().unwrap() {
                             None => {
                                 status = Status::RestartProcess;
@@ -326,7 +326,7 @@ fn main() -> Result<(), Error> {
         }
         match signal_receiver.try_recv() {
             Ok(signal) => {
-                if let Some(mut child) = child {
+                if let Some(child) = child {
                     return signal_with_kill_fallback(child, signal);
                 }
             }

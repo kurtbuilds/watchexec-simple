@@ -10,11 +10,11 @@ pub fn handle_event(
         return true;
     }
     for ignore in &filter.ignore_globs {
-        if ignore.matches(&w.to_string_lossy().as_ref()) {
+        if ignore.matches(w.to_string_lossy().as_ref()) {
             return false;
         }
     }
-    if filter.extensions.len() > 0 {
+    if !filter.extensions.is_empty() {
         return match w.extension() {
             Some(ext) => {
                 filter.extensions.contains(&ext.to_string_lossy().as_ref())
@@ -34,7 +34,7 @@ pub fn handle_event(
             return false;
         }
     }
-    return true;
+    true
 }
 
 
@@ -76,7 +76,7 @@ pub fn find_project_gitignore() -> Option<Gitignore> {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Borrow;
+    
     use ignore::gitignore::GitignoreBuilder;
     use super::*;
 
