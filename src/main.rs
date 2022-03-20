@@ -11,7 +11,9 @@ use std::path::{Path};
 use std::process::{Command};
 
 use std::sync::mpsc::{channel, RecvTimeoutError, TryRecvError};
-use std::thread;
+use std::{fs, thread};
+use std::io::stdout;
+use std::sync::atomic::Ordering;
 use crate::error::Error;
 
 use std::time::{Duration, Instant};
@@ -62,11 +64,11 @@ enum BusyAction {
 }
 
 
-fn build_app() -> clap::App<'static> {
-    clap::App::new(NAME)
+fn build_app() -> clap::Command<'static> {
+    clap::Command::new(NAME)
         .version(VERSION)
         .about("Run command")
-        .setting(AppSettings::ArgRequiredElseHelp)
+        .arg_required_else_help(true)
         .arg(Arg::new("verbose")
             .long("verbose")
             .short('v')
@@ -76,6 +78,11 @@ fn build_app() -> clap::App<'static> {
             .long("debounce")
             .default_value("100")
             .help("Set the timeout between detected change and command execution, defaults to 100ms")
+        )
+        .arg(Arg::new("clear")
+            .long("clear")
+            .short('L')
+            .help("Clear screen before running command")
         )
         .arg(Arg::new("ignore")
             .long("ignore")
@@ -91,6 +98,7 @@ fn build_app() -> clap::App<'static> {
             .takes_value(true)
             .multiple_values(true)
             .multiple_occurrences(true)
+            .value_delimiter(',')
         )
         .arg(Arg::new("on-busy-update")
             .long("on-busy-update")
@@ -129,9 +137,6 @@ fn build_app() -> clap::App<'static> {
 }
 
 fn signal_with_kill_fallback(mut child: GroupChild, signal: Signal) -> Result<(), Error> {
-    if child.try_wait().is_ok() {
-            return Ok(());
-    }
     child.signal(signal).unwrap();
     let start = Instant::now();
     let mut has_printed_failure = false;
@@ -229,6 +234,9 @@ fn main() -> Result<(), Error> {
         }
     }
 
+    let clear = args.is_present("clear");
+
+    cond_eprintln!(verbose, "Only check extensions: {:?}", extensions);
     let filter = Filter {
         watched_files,
         extensions,
@@ -237,14 +245,15 @@ fn main() -> Result<(), Error> {
         ignore_globs,
     };
 
-    let (signal_sender, signal_receiver) = channel::<Signal>();
-
     let mut status = Status::RestartProcess;
     let mut child: Option<GroupChild> = None;
 
-    ctrlc::set_handler(move || {
-        signal_sender.send(Signal::SIGINT).unwrap();
-    }).unwrap();
+    let terminate_signal = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    signal_hook::flag::register(signal_hook::consts::SIGINT, terminate_signal.clone())
+        .map_err(|e| err!("Failed to register SIGINT handler: {}", e))?;
+    signal_hook::flag::register(signal_hook::consts::SIGHUP, terminate_signal.clone())
+        .map_err(|e| err!("Failed to register SIGHUP handler: {}", e))?;
 
     loop {
         if status == Status::RestartProcess {
@@ -254,7 +263,7 @@ fn main() -> Result<(), Error> {
                 BusyAction::Restart => {
                     if let Some(mut child) = child.take() {
                         cond_eprintln!(verbose, "Waiting for process to exit...");
-                        child.signal(signal).unwrap();
+                        child.signal(signal);
                         child.wait().unwrap();
                         cond_eprintln!(verbose, "Exited");
                     }
@@ -287,11 +296,20 @@ fn main() -> Result<(), Error> {
                 .map(|s| shell_escape::escape(Cow::from(*s)))
                 .collect::<Vec<Cow<'_, str>>>()
                 .join(" "));
+            if clear {
+                clearscreen::clear().expect("failed to clear screen");
+            }
             child = Some(Command::new(&command[0])
                 .args(&command[1..])
                 .group_spawn()
                 .map_err(|_| err!("{}: command not found", command[0]))?);
         }
+
+        if terminate_signal.load(std::sync::atomic::Ordering::Relaxed) {
+            child.take().map(|mut c| c.signal(signal));
+            return Ok(());
+        }
+
         match receiver.recv_timeout(Duration::from_millis(debounce)) {
             Ok(event) => {
                 let w = match event {
@@ -324,16 +342,17 @@ fn main() -> Result<(), Error> {
                 }
             }
         }
-        match signal_receiver.try_recv() {
-            Ok(signal) => {
-                if let Some(child) = child {
-                    return signal_with_kill_fallback(child, signal);
-                }
-            }
-            Err(TryRecvError::Empty) => {}
-            Err(TryRecvError::Disconnected) => {
-                return Err(err!("watchexec disconected"));
-            }
-        }
+        // match signal_receiver.try_recv() {
+        //     Ok(signal) => {
+        //         return match child.take() {
+        //             Some(child) => signal_with_kill_fallback(child, signal),
+        //             None => Ok(())
+        //         }
+        //     }
+        //     Err(TryRecvError::Empty) => {}
+        //     Err(TryRecvError::Disconnected) => {
+        //         return Err(err!("watchexec disconected"));
+        //     }
+        // }
     }
 }

@@ -47,15 +47,15 @@ pub struct Filter<'a> {
 }
 
 impl<'a> Filter<'a> {
-    pub fn new() -> Self {
-        Filter {
-            watched_files: Vec::new(),
-            extensions: Vec::new(),
-            gitignore: None,
-            global_gitignore: None,
-            ignore_globs: Vec::new(),
-        }
-    }
+    // pub fn new() -> Self {
+    //     Filter {
+    //         watched_files: Vec::new(),
+    //         extensions: Vec::new(),
+    //         gitignore: None,
+    //         global_gitignore: None,
+    //         ignore_globs: Vec::new(),
+    //     }
+    // }
 }
 
 
