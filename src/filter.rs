@@ -19,7 +19,14 @@ pub fn handle_event(
             Some(ext) => {
                 filter.extensions.contains(&ext.to_string_lossy().as_ref())
             }
-            None => filter.extensions.contains(&w.file_name().unwrap().to_str().unwrap())
+            None => {
+                let z = w.file_name().unwrap().to_str().unwrap();
+                if z.starts_with(".") {
+                    filter.extensions.contains(&&z[1..])
+                } else {
+                    false
+                }
+            }
         };
     }
     if let Some(gitignore) = &filter.gitignore {
