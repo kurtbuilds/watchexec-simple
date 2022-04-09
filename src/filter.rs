@@ -19,12 +19,10 @@ pub fn handle_event(
             Some(ext) => {
                 filter.extensions.contains(&ext.to_string_lossy().as_ref())
             }
-            None => false
-        }
+            None => filter.extensions.contains(&w.file_name().unwrap().to_str().unwrap())
+        };
     }
     if let Some(gitignore) = &filter.gitignore {
-        eprintln!("gitignore: {:?}", gitignore);
-        eprintln!("path: {:?}", w);
         if gitignore.matched_path_or_any_parents(&w.to_string_lossy().as_ref(), w.is_dir()).is_ignore() {
             return false;
         }
@@ -38,6 +36,7 @@ pub fn handle_event(
 }
 
 
+#[derive(Debug)]
 pub struct Filter<'a> {
     pub watched_files: Vec<&'a str>,
     pub extensions: Vec<&'a str>,
