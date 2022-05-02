@@ -10,14 +10,14 @@ use std::borrow::Cow;
 use std::path::{Path};
 use std::process::{Command};
 
-use std::sync::mpsc::{channel, RecvTimeoutError, TryRecvError};
-use std::{fs, thread};
-use std::io::stdout;
-use std::sync::atomic::Ordering;
+use std::sync::mpsc::{channel, RecvTimeoutError};
+use std::{thread};
+
+
 use crate::error::Error;
 
 use std::time::{Duration, Instant};
-use clap::{AppSettings, Arg};
+use clap::{Arg};
 use command_group::{CommandGroup, GroupChild, Signal, UnixChildExt};
 use glob::{Pattern, PatternError};
 use ignore::gitignore::{Gitignore};
@@ -134,32 +134,6 @@ fn build_app() -> clap::Command<'static> {
             .required(true)
             .help("The command to execute if an update has occurred.")
         )
-}
-
-fn signal_with_kill_fallback(mut child: GroupChild, signal: Signal) -> Result<(), Error> {
-    child.signal(signal).unwrap();
-    let start = Instant::now();
-    let mut has_printed_failure = false;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => { break; }
-            Ok(None) => {
-                thread::sleep(Duration::from_millis(25));
-            }
-            Err(_e) => {
-                return Err(err!("Failed to wait for child process to exit"));
-            }
-        }
-        if start.elapsed() > Duration::from_millis(200) && !has_printed_failure {
-            has_printed_failure = true;
-            println!("Child didn't immediately exit. Giving it 5 seconds to exit before forcibly killing it, which might prevent any cleanup operations it performs.");
-        }
-        if start.elapsed() > Duration::from_secs(5) {
-            child.kill().unwrap();
-            return Err(err!("Child failed to exit gracefully within 5 seconds. Killing it."));
-        }
-    }
-    Ok(())
 }
 
 fn main() -> Result<(), Error> {
@@ -342,17 +316,5 @@ fn main() -> Result<(), Error> {
                 }
             }
         }
-        // match signal_receiver.try_recv() {
-        //     Ok(signal) => {
-        //         return match child.take() {
-        //             Some(child) => signal_with_kill_fallback(child, signal),
-        //             None => Ok(())
-        //         }
-        //     }
-        //     Err(TryRecvError::Empty) => {}
-        //     Err(TryRecvError::Disconnected) => {
-        //         return Err(err!("watchexec disconected"));
-        //     }
-        // }
     }
 }

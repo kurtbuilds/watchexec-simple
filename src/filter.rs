@@ -21,7 +21,7 @@ pub fn handle_event(
             }
             None => {
                 let z = w.file_name().unwrap().to_str().unwrap();
-                if z.starts_with(".") {
+                if z.starts_with('.') {
                     filter.extensions.contains(&&z[1..])
                 } else {
                     false
