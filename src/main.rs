@@ -4,6 +4,7 @@ extern crate core;
 
 mod error;
 mod filter;
+
 use notify::{DebouncedEvent, RecursiveMode, Watcher, watcher};
 use std::borrow::Cow;
 
@@ -21,9 +22,6 @@ use clap::{Arg};
 use command_group::{CommandGroup, GroupChild, Signal, UnixChildExt};
 use glob::{Pattern, PatternError};
 use ignore::gitignore::{Gitignore};
-
-
-
 
 
 use filter::Filter;
@@ -237,7 +235,8 @@ fn main() -> Result<(), Error> {
                 BusyAction::Restart => {
                     if let Some(mut child) = child.take() {
                         cond_eprintln!(verbose, "Waiting for process to exit...");
-                        child.signal(signal);
+                        child.signal(signal)
+                            .map_err(|_e| Error { message: "Failed to signal children.".to_string() })?;
                         child.wait().unwrap();
                         cond_eprintln!(verbose, "Exited");
                     }
