@@ -154,16 +154,20 @@ fn main() -> Result<(), Error> {
 
     let mut ignore_globs = args.values_of("ignore")
         .unwrap_or_default()
-        .map(Pattern::new)
+        .map(|s| {
+            let mut s = s.to_string();
+            s += "/*";
+            Pattern::new(&s)
+        })
         .collect::<Result<Vec<_>, PatternError>>()
         .map_err(|e| err!("Invalid ignore glob: {}", e))?;
 
     if !args.is_present("no-default-ignore") {
         ignore_globs.push(Pattern::new("*~")
             .map_err(|e| err!("Invalid ignore glob: {}", e))?);
-        ignore_globs.push(Pattern::new(".DS_Store")
+        ignore_globs.push(Pattern::new("**/.DS_Store")
             .map_err(|e| err!("Invalid ignore glob: {}", e))?);
-        ignore_globs.push(Pattern::new(".git")
+        ignore_globs.push(Pattern::new(".git/*")
             .map_err(|e| err!("Invalid ignore glob: {}", e))?);
     }
 
@@ -227,6 +231,8 @@ fn main() -> Result<(), Error> {
     signal_hook::flag::register(signal_hook::consts::SIGHUP, terminate_signal.clone())
         .map_err(|e| err!("Failed to register SIGHUP handler: {}", e))?;
 
+    let current_dir = std::env::current_dir().unwrap();
+
     loop {
         if status == Status::RestartProcess {
             status = Status::Waiting;
@@ -236,7 +242,7 @@ fn main() -> Result<(), Error> {
                     if let Some(mut child) = child.take() {
                         cond_eprintln!(verbose, "Waiting for process to exit...");
                         child.signal(signal)
-                            .map_err(|_e| Error { message: "Failed to signal children.".to_string() })?;
+                            .unwrap_or_else(|e| cond_eprintln!(verbose, "Failed to signal children: {}", e));
                         child.wait().unwrap();
                         cond_eprintln!(verbose, "Exited");
                     }
@@ -294,6 +300,7 @@ fn main() -> Result<(), Error> {
                     }
                     _ => continue,
                 };
+                let w = w.strip_prefix(&current_dir).unwrap();
                 if !filter::handle_event(&w, &filter) {
                     continue;
                 }
