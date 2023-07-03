@@ -156,7 +156,7 @@ fn main() -> Result<(), Error> {
         .unwrap_or_default()
         .map(|s| {
             let mut s = s.to_string();
-            s += "/*";
+            s += "*";
             Pattern::new(&s)
         })
         .collect::<Result<Vec<_>, PatternError>>()
