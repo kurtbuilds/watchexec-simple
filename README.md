@@ -40,8 +40,4 @@ watchexec -r cargo run
 
 # Installation
 
-Not currently published to cargo. Git clone it and then install from local.
-
-    git clone https://github.com/kurtbuilds/watchexec-simple
-    cd watchexec-simple
-    cargo install --path .
+    cargo install watchexec-simple
