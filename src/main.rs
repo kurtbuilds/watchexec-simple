@@ -1,7 +1,4 @@
 #![forbid(unsafe_code)]
-#![forbid(unused)]
-
-extern crate core;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command};
