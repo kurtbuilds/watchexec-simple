@@ -2,41 +2,31 @@
 
 extern crate core;
 
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, RecvTimeoutError};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use clap::{Parser, ValueEnum};
+use command_group::{CommandGroup, GroupChild, Signal, UnixChildExt};
+use glob::{Pattern, PatternError};
+use ignore::gitignore::Gitignore;
+use notify::{DebouncedEvent, RecursiveMode, watcher, Watcher};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+use filter::Filter;
+use tracing::{Level, debug};
+
+use crate::error::Error;
+use crate::filter::find_project_gitignore;
+
 mod error;
 mod filter;
 
-use notify::{DebouncedEvent, RecursiveMode, Watcher, watcher};
-use std::borrow::Cow;
-
-use std::path::{Path};
-use std::process::{Command};
-
-use std::sync::mpsc::{channel, RecvTimeoutError};
-use std::{thread};
-
-
-use crate::error::Error;
-
-use std::time::{Duration, Instant};
-use clap::{Arg};
-use command_group::{CommandGroup, GroupChild, Signal, UnixChildExt};
-use glob::{Pattern, PatternError};
-use ignore::gitignore::{Gitignore};
-
-
-use filter::Filter;
-use crate::filter::find_project_gitignore;
-
-
-macro_rules! cond_eprintln {
-    ($cond:expr, $($arg:tt)*) => {
-        if $cond {
-            eprintln!($($arg)*);
-        }
-    }
-}
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-const NAME: &str = env!("CARGO_PKG_NAME");
 
 macro_rules! err {
     ($($arg:tt)*) => {
@@ -61,99 +51,91 @@ enum BusyAction {
     Queue,
 }
 
+#[derive(ValueEnum, Debug, Copy, Clone)]
+enum OnBusyUpdate {
+    Signal,
+    Queue,
+    DoNothing,
+}
 
-fn build_app() -> clap::Command<'static> {
-    clap::Command::new(NAME)
-        .version(VERSION)
-        .about("Run command")
-        .arg_required_else_help(true)
-        .arg(Arg::new("verbose")
-            .long("verbose")
-            .short('v')
-        )
-        .arg(Arg::new("debounce")
-            .short('d')
-            .long("debounce")
-            .default_value("100")
-            .help("Set the timeout between detected change and command execution, defaults to 100ms")
-        )
-        .arg(Arg::new("clear")
-            .long("clear")
-            .short('L')
-            .help("Clear screen before running command")
-        )
-        .arg(Arg::new("ignore")
-            .long("ignore")
-            .short('i')
-            .help("Ignore paths matching the pattern")
-            .takes_value(true)
-            .multiple_values(true)
-            .multiple_occurrences(true)
-        )
-        .arg(Arg::new("extensions")
-            .long("exts")
-            .short('e')
-            .takes_value(true)
-            .multiple_values(true)
-            .multiple_occurrences(true)
-            .value_delimiter(',')
-        )
-        .arg(Arg::new("on-busy-update")
-            .long("on-busy-update")
-            .takes_value(true)
-            .possible_values(&["do-nothing", "queue", "signal"])
-            .default_value("signal")
-            .help("Select the behaviour to use when receiving events while the command is running")
-        )
-        .arg(Arg::new("signal")
-            .long("signal")
-            .takes_value(true)
-            .possible_values(&["SIGHUP", "SIGINT", "SIGQUIT", "SIGTERM"])
-            .default_value("SIGTERM")
-            .help("The signal to send to the command if on-busy-update is set to signal")
-        )
-        .arg(Arg::new("no-default-ignore")
-            .long("no-default-ignore")
-            .help("Do not use the default ignore globs")
-        )
-        .arg(Arg::new("no-global-ignore")
-            .long("no-global-ignore")
-        )
-        .arg(Arg::new("no-project-ignore")
-            .long("no-project-ignore")
-            .help("Skip auto-loading of project ignore files (.gitignore, etc)")
-        )
-        .arg(Arg::new("paths")
-            .multiple_values(true)
-        )
-        .arg(Arg::new("command")
-            .last(true)
-            .min_values(1)
-            .required(true)
-            .help("The command to execute if an update has occurred.")
-        )
+#[derive(ValueEnum, Debug, Copy, Clone)]
+#[clap(rename_all = "verbatim")]
+enum ChildSignal {
+    SIGHUP,
+    SIGINT,
+    SIGQUIT,
+    SIGTERM,
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+struct Cli {
+    /// Set the timeout between detected change and command execution, defaults to 100ms
+    #[clap(long, short, default_value = "100")]
+    debounce: u64,
+    /// Clear screen before running command
+    #[clap(long, short = 'L')]
+    clear: bool,
+
+    /// Ignore paths matching the pattern
+    #[clap(long, short)]
+    ignore: Vec<String>,
+
+    /// Only watch paths with the given file extension
+    #[clap(long, short, value_delimiter(','))]
+    extensions: Vec<String>,
+
+    /// Select the behaviour to use when receiving events while the command is running
+    #[clap(long, default_value = "signal")]
+    on_busy_update: OnBusyUpdate,
+
+    /// The signal to send to the command if on-busy-update is set to signal
+    #[clap(long, default_value = "SIGTERM")]
+    signal: ChildSignal,
+
+    /// Do not use the default ignore globs
+    #[clap(long)]
+    no_default_ignore: bool,
+
+    #[clap(long)]
+    no_global_ignore: bool,
+
+    /// Skip auto-loading of project ignore files (.gitignore, etc)
+    #[clap(long)]
+    no_project_ignore: bool,
+
+    #[clap(default_value = ".")]
+    paths: Vec<String>,
+
+    #[clap(last(true), required(true), num_args(1..))]
+    command: Vec<String>,
+
+    #[clap(long, short, global = true)]
+    verbose: bool,
 }
 
 fn main() -> Result<(), Error> {
-    let args = build_app().get_matches();
+    let cli = Cli::parse();
+    let level = if cli.verbose { Level::DEBUG } else { Level::INFO };
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().without_time().with_target(false))
+        .with(tracing_subscriber::filter::Targets::new()
+            .with_target(env!("CARGO_BIN_NAME"), level)
+        )
+        .init();
 
-    let command = args.values_of("command").unwrap().collect::<Vec<&str>>();
-    let signal = match args.value_of("signal").unwrap().to_uppercase().as_ref() {
-        "SIGHUP" => Signal::SIGHUP,
-        "SIGINT" => Signal::SIGINT,
-        "SIGQUIT" => Signal::SIGQUIT,
-        "SIGTERM" => Signal::SIGTERM,
-        _ => return Err(err!("Invalid signal. Choices are: SIGHUP, SIGINT, SIGQUIT, SIGTERM"))
+    let command = cli.command;
+    let signal = match cli.signal {
+        ChildSignal::SIGHUP => Signal::SIGHUP,
+        ChildSignal::SIGINT => Signal::SIGINT,
+        ChildSignal::SIGQUIT => Signal::SIGQUIT,
+        ChildSignal::SIGTERM => Signal::SIGTERM,
     };
-    let verbose = args.is_present("verbose");
-    let debounce = args.value_of("debounce").unwrap().parse::<u64>().unwrap();
+    let debounce = cli.debounce;
 
-    let extensions = args.values_of("extensions")
-        .unwrap_or_default()
-        .collect::<Vec<&str>>();
+    let extensions = cli.extensions;
 
-    let mut ignore_globs = args.values_of("ignore")
-        .unwrap_or_default()
+    let mut ignore_globs = cli.ignore.iter()
         .map(|s| {
             let mut s = s.to_string();
             s += "*";
@@ -162,7 +144,7 @@ fn main() -> Result<(), Error> {
         .collect::<Result<Vec<_>, PatternError>>()
         .map_err(|e| err!("Invalid ignore glob: {}", e))?;
 
-    if !args.is_present("no-default-ignore") {
+    if !cli.no_default_ignore {
         ignore_globs.push(Pattern::new("*~")
             .map_err(|e| err!("Invalid ignore glob: {}", e))?);
         ignore_globs.push(Pattern::new("**/.DS_Store")
@@ -171,20 +153,19 @@ fn main() -> Result<(), Error> {
             .map_err(|e| err!("Invalid ignore glob: {}", e))?);
     }
 
-    let strategy = match args.value_of("on-busy-update").unwrap() {
-        "signal" => BusyAction::Restart,
-        "queue" => BusyAction::Queue,
-        "do-nothing" => BusyAction::DoNothing,
-        _ => return Err(err!("Invalid on-busy-update. Choices are: signal, queue, do-nothing"))
+    let strategy = match cli.on_busy_update {
+        OnBusyUpdate::Signal => BusyAction::Restart,
+        OnBusyUpdate::Queue => BusyAction::Queue,
+        OnBusyUpdate::DoNothing => BusyAction::DoNothing,
     };
 
-    let gitignore = if args.is_present("no-project-ignore") {
+    let gitignore = if cli.no_project_ignore {
         None
     } else {
         find_project_gitignore()
     };
 
-    let global_gitignore = if args.is_present("no-global-ignore") {
+    let global_gitignore = if cli.no_global_ignore {
         None
     } else {
         let (g, _) = Gitignore::global();
@@ -195,25 +176,23 @@ fn main() -> Result<(), Error> {
     // Not sure why, but the built-in debouncing seems to cause us to drop tons of events that should
     // be handled. Instead, we implement our own debouncing.
     let mut watcher = watcher(sender, Duration::from_millis(0)).unwrap();
-    let mut watched_files = Vec::new();
-    for s in args.values_of("paths")
-        .map(|v| v.collect::<Vec<&str>>())
-        .unwrap_or_else(|| vec!["."]) {
-        let p = Path::new(s);
+    let mut watched_files: Vec<PathBuf> = Vec::new();
+    for s in cli.paths.iter() {
+        let p = std::fs::canonicalize(&Path::new(s)).unwrap();
         if p.is_dir() {
-            cond_eprintln!(verbose, "{}: Watching directory", p.to_string_lossy());
+            debug!("{}: Watching directory", p.display());
             watcher.watch(p, RecursiveMode::Recursive).unwrap();
         } else {
-            cond_eprintln!(verbose, "{}: Watching file", p.to_string_lossy());
-            watcher.watch(p, RecursiveMode::NonRecursive).unwrap();
-            watched_files.push(s);
+            debug!("{}: Watching file", p.display());
+            watcher.watch(&p, RecursiveMode::NonRecursive).unwrap();
+            watched_files.push(p);
         }
     }
 
-    let clear = args.is_present("clear");
+    let current_dir = std::env::current_dir().unwrap();
 
-    cond_eprintln!(verbose, "Only check extensions: {:?}", extensions);
     let filter = Filter {
+        working_dir: current_dir,
         watched_files,
         extensions,
         gitignore,
@@ -224,27 +203,28 @@ fn main() -> Result<(), Error> {
     let mut status = Status::RestartProcess;
     let mut child: Option<GroupChild> = None;
 
-    let terminate_signal = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let terminate_signal = Arc::new(AtomicBool::new(false));
+    let child_signal = Arc::new(AtomicBool::new(false));
 
     signal_hook::flag::register(signal_hook::consts::SIGINT, terminate_signal.clone())
-        .map_err(|e| err!("Failed to register SIGINT handler: {}", e))?;
-    signal_hook::flag::register(signal_hook::consts::SIGHUP, terminate_signal.clone())
-        .map_err(|e| err!("Failed to register SIGHUP handler: {}", e))?;
-
-    let current_dir = std::env::current_dir().unwrap();
+        .unwrap();
+    signal_hook::flag::register(signal_hook::consts::SIGCHLD, child_signal.clone())
+        .unwrap();
 
     loop {
+
+        // restart the process if necessary
         if status == Status::RestartProcess {
             status = Status::Waiting;
 
             match strategy {
                 BusyAction::Restart => {
                     if let Some(mut child) = child.take() {
-                        cond_eprintln!(verbose, "Waiting for process to exit...");
+                        debug!("Waiting for process to exit...");
                         child.signal(signal)
-                            .unwrap_or_else(|e| cond_eprintln!(verbose, "Failed to signal children: {}", e));
+                            .unwrap_or_else(|e| debug!("Failed to signal children: {}", e));
                         child.wait().unwrap();
-                        cond_eprintln!(verbose, "Exited");
+                        debug!("Exited");
                     }
                 }
                 BusyAction::DoNothing => {
@@ -270,12 +250,7 @@ fn main() -> Result<(), Error> {
                     }
                 }
             }
-
-            cond_eprintln!(verbose, "{}", command.iter()
-                .map(|s| shell_escape::escape(Cow::from(*s)))
-                .collect::<Vec<Cow<'_, str>>>()
-                .join(" "));
-            if clear {
+            if cli.clear {
                 clearscreen::clear().expect("failed to clear screen");
             }
             child = Some(Command::new(&command[0])
@@ -284,11 +259,24 @@ fn main() -> Result<(), Error> {
                 .map_err(|_| err!("{}: command not found", command[0]))?);
         }
 
-        if terminate_signal.load(std::sync::atomic::Ordering::Relaxed) {
-            child.take().map(|mut c| c.signal(signal));
-            return Ok(());
+        // check if we've been asked to terminate
+        if terminate_signal.load(Ordering::Relaxed) {
+            child.take().map(|mut c| c.signal(Signal::SIGINT));
+            std::process::exit(1);
         }
 
+        // check if the child terminated via signal
+        // this is a hack to get around the fact that vite
+        // swallows SIGTERM and SIGINT
+        if let Some(c) = &mut child {
+            if let Ok(Some(exit)) = c.try_wait() {
+                if child_signal.load(Ordering::Relaxed) {
+                    std::process::exit(130);
+                }
+            }
+        }
+
+        // check if we should trigger a restart based on a file change
         match receiver.recv_timeout(Duration::from_millis(debounce)) {
             Ok(event) => {
                 let w = match event {
@@ -300,11 +288,11 @@ fn main() -> Result<(), Error> {
                     }
                     _ => continue,
                 };
-                let w = w.strip_prefix(&current_dir).unwrap();
+
                 if !filter::handle_event(&w, &filter) {
                     continue;
                 }
-                cond_eprintln!(verbose, "{}: File modified. Queuing restart.", w.to_str().unwrap());
+                debug!("{}: File modified. Queuing restart.", w.display());
                 status = Status::RestartTriggered(Instant::now());
             }
             Err(e) => {

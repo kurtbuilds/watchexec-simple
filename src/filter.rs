@@ -3,19 +3,22 @@ use glob::Pattern;
 use std::path::{Path, PathBuf};
 
 pub fn handle_event(
-    w: &Path,
+    p: &Path,
     filter: &Filter,
 ) -> bool {
-    if filter.watched_files.contains(&w.to_string_lossy().as_ref()) {
+    if filter.watched_files.iter().any(|w| w == p) {
         return true;
     }
+    let Ok(p) = p.strip_prefix(&filter.working_dir) else {
+        return false;
+    };
     for ignore in &filter.ignore_globs {
-        if ignore.matches_path(&w) {
+        if ignore.matches_path(&p) {
             return false;
         }
     }
     if !filter.extensions.is_empty() {
-        return w.components()
+        return p.components()
             .last()
             .unwrap()
             .as_os_str()
@@ -23,16 +26,16 @@ pub fn handle_event(
             .unwrap()
             .splitn(2, '.')
             .last()
-            .map(|ext| filter.extensions.contains(&ext))
+            .map(|ext| filter.extensions.iter().any(|e| e == ext))
             .unwrap_or(false);
     }
     if let Some(gitignore) = &filter.gitignore {
-        if gitignore.matched_path_or_any_parents(&w.to_string_lossy().as_ref(), w.is_dir()).is_ignore() {
+        if gitignore.matched_path_or_any_parents(&p.to_string_lossy().as_ref(), p.is_dir()).is_ignore() {
             return false;
         }
     }
     if let Some(global_ignore) = &filter.global_gitignore {
-        if global_ignore.matched_path_or_any_parents(&w.to_string_lossy().as_ref(), w.is_dir()).is_ignore() {
+        if global_ignore.matched_path_or_any_parents(&p.to_string_lossy().as_ref(), p.is_dir()).is_ignore() {
             return false;
         }
     }
@@ -41,26 +44,15 @@ pub fn handle_event(
 
 
 #[derive(Debug)]
-pub struct Filter<'a> {
-    pub watched_files: Vec<&'a str>,
-    pub extensions: Vec<&'a str>,
+pub struct Filter {
+    pub working_dir: PathBuf,
+    /// Must be canonical (absolute) paths
+    pub watched_files: Vec<PathBuf>,
+    pub extensions: Vec<String>,
     pub gitignore: Option<Gitignore>,
     pub global_gitignore: Option<Gitignore>,
     pub ignore_globs: Vec<Pattern>,
 }
-
-impl<'a> Filter<'a> {
-    pub fn new() -> Self {
-        Filter {
-            watched_files: Vec::new(),
-            extensions: Vec::new(),
-            gitignore: None,
-            global_gitignore: None,
-            ignore_globs: Vec::new(),
-        }
-    }
-}
-
 
 pub fn find_project_gitignore() -> Option<Gitignore> {
     let mut path = PathBuf::from(".");
