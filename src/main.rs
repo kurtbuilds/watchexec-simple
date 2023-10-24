@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
+#![forbid(unused)]
 
 extern crate core;
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus};
+use std::process::{Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, RecvTimeoutError};
@@ -269,7 +270,7 @@ fn main() -> Result<(), Error> {
         // this is a hack to get around the fact that vite
         // swallows SIGTERM and SIGINT
         if let Some(c) = &mut child {
-            if let Ok(Some(exit)) = c.try_wait() {
+            if let Ok(Some(_)) = c.try_wait() {
                 if child_signal.load(Ordering::Relaxed) {
                     std::process::exit(130);
                 }
